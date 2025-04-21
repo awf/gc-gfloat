@@ -48,7 +48,7 @@ def round_float(
 
     # Constants
     p = fi.precision
-    bias = fi.expBias
+    bias = fi.bias
 
     if rnd in (RoundMode.Stochastic, RoundMode.StochasticFast):
         if srbits >= 2**srnumbits:

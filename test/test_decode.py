@@ -181,7 +181,7 @@ def test_spot_check_ocp_e8m0(method: str) -> None:
     fi = format_info_ocp_e8m0
     dec = get_method(method, fi)
     fclass = lambda code: decode_float(fi, code).fclass
-    assert fi.expBias == 127
+    assert fi.bias == 127
     assert fi.max == 2.0**127
     assert fi.smallest == 2.0**-127
     assert not fi.has_infs

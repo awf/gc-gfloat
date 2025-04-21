@@ -61,7 +61,7 @@ def encode_ndarray(fi: FormatInfo, v: npt.NDArray) -> npt.NDArray:
 
         sig, exp = np.frexp(finite_vpos)
 
-        biased_exp = exp.astype(np.int64) + (fi.expBias - 1)
+        biased_exp = exp.astype(np.int64) + (fi.bias - 1)
         subnormal_mask = (biased_exp < 1) & fi.has_subnormals
 
         biased_exp_safe = np.where(subnormal_mask, biased_exp, 0)

@@ -65,12 +65,12 @@ def encode_float(fi: FormatInfo, v: float) -> int:
         exp -= 1
         # now sig in range [1, 2)
 
-        biased_exp = exp + fi.expBias
+        biased_exp = exp + fi.bias
         if biased_exp < 1 and fi.has_subnormals:
             # subnormal
             sig *= 2.0 ** (biased_exp - 1)
             biased_exp = 0
-            assert vpos == sig * 2 ** (1 - fi.expBias)
+            assert vpos == sig * 2 ** (1 - fi.bias)
         else:
             if sig > 0:
                 sig -= 1.0

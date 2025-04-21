@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 
 
 class RoundMode(Enum):
@@ -84,8 +85,8 @@ class FormatInfo:
     #: Number of significand bits (including implicit leading bit)
     precision: int
 
-    #: Largest exponent, emax, which shall equal floor(log_2(maxFinite))
-    emax: int
+    #: Exponent bias
+    bias: int
 
     #: Set if format encodes -0 at (sgn=1,exp=0,significand=0).
     #: If False, that encoding decodes to a NaN labelled NaN_0
@@ -108,6 +109,31 @@ class FormatInfo:
     #: Set if the format uses two's complement encoding for the significand
     is_twos_complement: bool
 
+    def __init__(
+        self,
+        name: str,
+        k: int,
+        precision: int,
+        *,
+        bias: str,
+        has_nz: bool,
+        has_infs: bool,
+        num_high_nans: int,
+        has_subnormals: bool,
+        is_signed: bool,
+        is_twos_complement: bool,
+    ):
+        self.name = name
+        self.k = k
+        self.precision = precision
+        self.bias = bias
+        self.has_nz = has_nz
+        self.has_infs = has_infs
+        self.num_high_nans = num_high_nans
+        self.has_subnormals = has_subnormals
+        self.is_signed = is_signed
+        self.is_twos_complement = is_twos_complement
+
     #: ## Derived values
 
     @property
@@ -126,23 +152,13 @@ class FormatInfo:
         return 1 if self.is_signed else 0
 
     @property
-    def expBias(self) -> int:
-        """The exponent bias derived from (p,emax)
-
-        This is the bias that should be applied so that
-           :math:`floor(log_2(maxFinite)) = emax`
+    def emax(self) -> int:
+        """Return
+        :math:`floor(log_2(maxFinite)) = emax`
+        Note that for an all-subnormal format, this is not necessarily the
+        largest value in the exponent field.
         """
-        # Calculate whether all of the all-bits-one-exponent values contain specials.
-        # If so, emax will be obtained for exponent value 2^w-2, otherwise it is 2^w-1
-        t = self.tSignificandBits
-        num_posinfs = 1 if self.has_infs else 0
-        all_bits_one_full = (self.num_high_nans + num_posinfs == 2**t) or (
-            self.expBits == 0 and self.has_infs
-        )
-
-        # Compute exponent bias.
-        exp_for_emax = 2**self.expBits - (2 if all_bits_one_full else 1)
-        return exp_for_emax - self.emax
+        return math.floor(math.log2(self.max))
 
     # numpy finfo properties
     @property
@@ -205,15 +221,17 @@ class FormatInfo:
             # All-bits-one exponent field is full, value is in the
             # binade below, so significand is 0xFFF..F
             isig = 2**self.tSignificandBits - 1
+            emax = 2**self.expBits - 2
         else:
             # All-bits-one exponent field is not full, value is in the
             # final binade, so significand is 0xFFF..F - num_non_finites
             isig = 2**self.tSignificandBits - 1 - num_non_finites
+            emax = 2**self.expBits - 1
 
         if self.is_all_subnormal:
-            return 2**self.emax * (isig * 2 ** (1 - self.tSignificandBits))
+            return 2 ** (emax - self.bias) * (isig * 2 ** (1 - self.tSignificandBits))
         else:
-            return 2**self.emax * (1.0 + isig * 2**-self.tSignificandBits)
+            return 2 ** (emax - self.bias) * (1.0 + isig * 2**-self.tSignificandBits)
 
     @property
     def maxexp(self) -> int:
@@ -236,7 +254,7 @@ class FormatInfo:
         elif self.has_zero:
             return 0.0
         else:
-            return 2**-self.expBias
+            return 2**-self.bias
 
     @property
     def num_nans(self) -> int:
@@ -331,7 +349,7 @@ class FormatInfo:
         elif self.is_signed and self.is_twos_complement:
             return 2 ** (self.k - 1)
         else:
-            return 0  # codepoint of smallest value, whether 0 or 2^-expBias
+            return 0  # codepoint of smallest value, whether 0 or 2^-bias
 
     # @property
     # def minexp(self) -> int:
@@ -385,11 +403,11 @@ class FormatInfo:
         the significand following IEEE-754.
         """
         if self.has_subnormals:
-            return 2 ** (1 - self.expBias)
+            return 2 ** (1 - self.bias)
         elif self.has_zero:
-            return 2**-self.expBias + 2 ** (-self.expBias - self.tSignificandBits)
+            return 2**-self.bias + 2 ** (-self.bias - self.tSignificandBits)
         else:
-            return 2**-self.expBias
+            return 2**-self.bias
 
     @property
     def smallest_subnormal(self) -> float:
@@ -398,7 +416,7 @@ class FormatInfo:
         the significand following IEEE-754.
         """
         assert self.has_subnormals, "not implemented"
-        return 2 ** -(self.expBias + self.tSignificandBits - 1)
+        return 2 ** -(self.bias + self.tSignificandBits - 1)
 
     @property
     def smallest(self) -> float:

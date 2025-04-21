@@ -46,16 +46,16 @@ def decode_float(fi: FormatInfo, i: int) -> FloatValue:
     if fi.is_twos_complement and signbit:
         significand = (1 << t) - significand
 
-    expBias = fi.expBias
+    bias = fi.bias
 
     iszero = exp == 0 and significand == 0 and fi.has_zero
     issubnormal = fi.has_subnormals and (exp == 0) and (significand != 0)
     isnormal = not iszero and not issubnormal
     if iszero or issubnormal:
-        expval = 1 - expBias
+        expval = 1 - bias
         fsignificand = significand * 2**-t
     else:
-        expval = exp - expBias
+        expval = exp - bias
         fsignificand = 1.0 + significand * 2**-t
 
     # Handle specials: Infs, NaN, -0, NaN_0

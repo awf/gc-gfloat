@@ -70,7 +70,7 @@ def round_ndarray(
     xp_maximum = lambda a, b: xp.maximum(xp.asarray(a), xp.asarray(b))
 
     p = fi.precision
-    bias = fi.expBias
+    bias = fi.bias
 
     is_negative = xp.signbit(v) & fi.is_signed
     absv = xp_where(is_negative, -v, v)
