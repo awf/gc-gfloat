@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from .types import FloatClass, FloatValue, FormatInfo
+from .types import FloatClass, FloatValue, FormatInfo, Domain
 
 
 def decode_float(fi: FormatInfo, i: int) -> FloatValue:
@@ -59,16 +59,19 @@ def decode_float(fi: FormatInfo, i: int) -> FloatValue:
         fsignificand = 1.0 + significand * 2**-t
 
     # Handle specials: Infs, NaN, -0, NaN_0
-    signed_infinity = -np.inf if signbit else np.inf
 
+    # High NaNs
     fval = None
-    # All-bits-special exponent (ABSE)
-    if w > 0 and exp == 2**w - 1:
-        min_i_with_nan = 2 ** (p - 1) - fi.num_high_nans
-        if significand >= min_i_with_nan:
-            fval = np.nan
-        if fi.has_infs and significand == min_i_with_nan - 1:
-            fval = signed_infinity
+    max_positive_code = (1 << (k - fi.signBits)) - 1
+    code_without_sign = i & max_positive_code
+    if code_without_sign > max_positive_code - fi.num_high_nans:
+        # Return nan, ignore sign
+        fval = np.nan
+
+    # Infinities
+    if fi.domain == Domain.Extended:
+        if code_without_sign == max_positive_code - fi.num_high_nans:
+            fval = -np.inf if signbit else np.inf
 
     # Negative zero or NaN
     if iszero and i == signmask and not fi.is_twos_complement:

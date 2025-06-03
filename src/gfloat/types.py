@@ -36,6 +36,15 @@ class RoundMode(Enum):
     StochasticFastest = 9  #: Stochastic rounding - even faster, but more biased
 
 
+class Domain(Enum):
+    """
+    Enum for domain of values
+    """
+
+    Finite = 1  #: Finite values only
+    Extended = 2  #: Finite values and infinities
+
+
 class FloatClass(Enum):
     """
     Enum for the classification of a FloatValue.
@@ -95,7 +104,7 @@ class FormatInfo:
     #: Set if format includes +/- Infinity.
     #: If set, the non-nan value with the highest encoding for each sign (s)
     #: is replaced by (s)Inf.
-    has_infs: bool
+    domain: Domain
 
     #: Number of NaNs that are encoded in the highest encodings for each sign
     num_high_nans: int
@@ -115,9 +124,9 @@ class FormatInfo:
         k: int,
         precision: int,
         *,
-        bias: str,
+        bias: int,
         has_nz: bool,
-        has_infs: bool,
+        domain: Domain,
         num_high_nans: int,
         has_subnormals: bool,
         is_signed: bool,
@@ -128,7 +137,7 @@ class FormatInfo:
         self.precision = precision
         self.bias = bias
         self.has_nz = has_nz
-        self.has_infs = has_infs
+        self.domain = domain
         self.num_high_nans = num_high_nans
         self.has_subnormals = has_subnormals
         self.is_signed = is_signed
@@ -144,7 +153,7 @@ class FormatInfo:
     @property
     def expBits(self) -> int:
         """The number of exponent bits, w"""
-        return self.k - self.precision + (0 if self.is_signed else 1)
+        return self.k - self.tSignificandBits - self.signBits
 
     @property
     def signBits(self) -> int:
@@ -215,14 +224,47 @@ class FormatInfo:
         """
         The largest representable number.
         """
-        num_posinfs = 1 if self.has_infs else 0
-        num_non_finites = self.num_high_nans + num_posinfs
+        num_non_finites = self.num_high_nans + self.num_posinfs
         if num_non_finites == 2**self.tSignificandBits:
             # All-bits-one exponent field is full, value is in the
             # binade below, so significand is 0xFFF..F
             isig = 2**self.tSignificandBits - 1
             emax = 2**self.expBits - 2
+        elif num_non_finites == 2 ** (self.tSignificandBits + 1):
+            # Top two binades are full, value is in the
+            # binade below them. Significand is still 0xFFF..F
+            isig = 2**self.tSignificandBits - 1
+            emax = 2**self.expBits - 3
         else:
+            assert num_non_finites < 2**self.tSignificandBits
+            # All-bits-one exponent field is not full, value is in the
+            # final binade, so significand is 0xFFF..F - num_non_finites
+            isig = 2**self.tSignificandBits - 1 - num_non_finites
+            emax = 2**self.expBits - 1
+
+        if self.is_all_subnormal:
+            return 2 ** (emax - self.bias) * (isig * 2 ** (1 - self.tSignificandBits))
+        else:
+            return 2 ** (emax - self.bias) * (1.0 + isig * 2**-self.tSignificandBits)
+
+    @property
+    def e_and_sig_of_max(self) -> float:
+        """
+        Exponent and significand of the largest representable number.
+        """
+        num_non_finites = self.num_high_nans + self.num_posinfs
+        if num_non_finites == 2**self.tSignificandBits:
+            # All-bits-one exponent field is full, value is in the
+            # binade below, so significand is 0xFFF..F
+            isig = 2**self.tSignificandBits - 1
+            emax = 2**self.expBits - 2
+        elif num_non_finites == 2 ** (self.tSignificandBits + 1):
+            # Top two binades are full, value is in the
+            # binade below them. Significand is still 0xFFF..F
+            isig = 2**self.tSignificandBits - 1
+            emax = 2**self.expBits - 3
+        else:
+            assert num_non_finites < 2**self.tSignificandBits
             # All-bits-one exponent field is not full, value is in the
             # final binade, so significand is 0xFFF..F - num_non_finites
             isig = 2**self.tSignificandBits - 1 - num_non_finites
@@ -249,12 +291,18 @@ class FormatInfo:
             if not self.is_twos_complement:
                 return -self.max
             else:
-                assert not self.has_infs and self.num_high_nans == 0 and not self.has_nz
+                assert (
+                    (self.domain == Domain.Finite)
+                    and (self.num_high_nans == 0)
+                    and not self.has_nz
+                )
                 return -(2.0 ** (self.emax + 1))
-        elif self.has_zero:
-            return 0.0
         else:
-            return 2**-self.bias
+            # Unsigned
+            if self.has_zero:
+                return 0.0
+            else:
+                return 2**-self.bias
 
     @property
     def num_nans(self) -> int:
@@ -266,7 +314,11 @@ class FormatInfo:
 
         # Signed
         if self.is_twos_complement:
-            assert not self.has_infs and self.num_high_nans == 0 and not self.has_nz
+            assert (
+                (self.domain == Domain.Finite)
+                and (self.num_high_nans == 0)
+                and not self.has_nz
+            )
             return 0
 
         return (0 if self.has_nz else 1) + 2 * self.num_high_nans
@@ -287,18 +339,18 @@ class FormatInfo:
         """
         Return a codepoint for positive infinity
         """
-        if not self.has_infs:
+        if self.domain != Domain.Extended:
             raise ValueError(f"No Inf in {self}")
 
-        return 2 ** (self.k - 1) - 1 - self.num_high_nans
+        return 2 ** (self.k - self.signBits) - 1 - self.num_high_nans
 
     @property
     def code_of_neginf(self) -> int:
         """
         Return a codepoint for negative infinity
         """
-        if not self.has_infs:
-            raise ValueError(f"No Inf in {self}")
+        if not (self.domain == Domain.Extended and self.is_signed):
+            raise ValueError(f"No -Inf in {self}")
 
         return 2**self.k - 1 - self.num_high_nans
 
@@ -333,11 +385,18 @@ class FormatInfo:
         return 2 ** (self.k - 1)
 
     @property
+    def num_posinfs(self) -> int:
+        """
+        Return the number of positive infinities
+        """
+        return 1 if self.domain == Domain.Extended else 0
+
+    @property
     def code_of_max(self) -> int:
         """
         Return a codepoint for fi.max
         """
-        return 2 ** (self.k - self.signBits) - self.num_high_nans - self.has_infs - 1
+        return 2 ** (self.k - self.signBits) - 1 - self.num_high_nans - self.num_posinfs
 
     @property
     def code_of_min(self) -> int:
@@ -345,7 +404,7 @@ class FormatInfo:
         Return a codepoint for fi.min
         """
         if self.is_signed and not self.is_twos_complement:
-            return 2**self.k - self.num_high_nans - self.has_infs - 1
+            return 2**self.k - self.num_high_nans - self.num_posinfs - 1
         elif self.is_signed and self.is_twos_complement:
             return 2 ** (self.k - 1)
         else:

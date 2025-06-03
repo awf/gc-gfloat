@@ -2,7 +2,7 @@
 
 from typing import Optional
 from types import ModuleType
-from .types import FormatInfo, RoundMode
+from .types import FormatInfo, RoundMode, Domain
 
 import numpy.typing as npt
 import array_api_compat
@@ -177,7 +177,7 @@ def round_ndarray(
         result = xp_where(finite_nonzero & put_amax_at, amax, result)
 
         # Now anything larger than amax goes to infinity or NaN
-        if fi.has_infs:
+        if fi.domain == Domain.Extended:
             result = xp_where(result > amax, xp.inf, result)
         elif fi.num_nans > 0:
             result = xp_where(result > amax, xp.nan, result)

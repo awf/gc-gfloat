@@ -3,7 +3,7 @@
 from types import ModuleType
 import numpy as np
 import numpy.typing as npt
-from .types import FormatInfo
+from .types import FormatInfo, Domain
 
 
 def decode_ndarray(
@@ -52,11 +52,12 @@ def decode_ndarray(
     fval = np.zeros_like(codes, dtype=np.float64)
     isspecial = np.zeros_like(codes, dtype=bool)
 
-    if fi.has_infs:
+    if fi.domain == Domain.Extended:
         fval = np.where(codes == fi.code_of_posinf, np.inf, fval)
         isspecial |= codes == fi.code_of_posinf
-        fval = np.where(codes == fi.code_of_neginf, -np.inf, fval)
-        isspecial |= codes == fi.code_of_neginf
+        if fi.is_signed:
+            fval = np.where(codes == fi.code_of_neginf, -np.inf, fval)
+            isspecial |= codes == fi.code_of_neginf
 
     if fi.num_nans > 0:
         code_is_nan = codes == fi.code_of_nan
