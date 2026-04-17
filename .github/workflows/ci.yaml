@@ -26,6 +26,14 @@ jobs:
         run: |
           python3 -m pip freeze
 
+      - name: Bootstrap git for act
+        if: ${{ github.actor == 'nektos/act' }}
+        run: |
+          command -v git >/dev/null || (apt-get update && apt-get install -y git)
+          rm -rf "$GITHUB_WORKSPACE/.git"
+          git -C "$GITHUB_WORKSPACE" init
+          git -C "$GITHUB_WORKSPACE" add -A
+
       - name: Pre-commit all files
         run: |
           pre-commit run --all-files
